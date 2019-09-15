@@ -11,5 +11,23 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_alignParentBottom="true"
+        android:background="#000000">
+
+        <Button
+            android:id="@+id/capture"
+            android:layout_width="150dp"
+            android:layout_height="50dp"
+            android:text="Capture"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:background="@android:color/transparent"
+            android:layout_centerInParent="true"/>
+
+    </RelativeLayout>
+
 
 </RelativeLayout>
