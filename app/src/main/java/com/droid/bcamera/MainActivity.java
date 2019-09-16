@@ -1,107 +1,70 @@
 package com.droid.bcamera;
 
-import androidx.appcompat.app.AppCompatActivity;
-
-import android.graphics.SurfaceTexture;
-import android.hardware.camera2.CameraAccessException;
-import android.hardware.camera2.CameraCaptureSession;
-import android.hardware.camera2.CameraDevice;
-import android.hardware.camera2.CaptureFailure;
-import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.TotalCaptureResult;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.View;
-import android.widget.Button;
 
-import com.droid.botcam.BotCam;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
+
 import com.droid.botcam.BotCamera;
-
-import java.io.FileNotFoundException;
+import com.droid.botcam.DroidFunctions;
 
 public class MainActivity extends AppCompatActivity {
 
-    private BotCam camera;
+    BotCamera botCamera;
+
+    boolean isFront = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        camera = findViewById(R.id.camera);
+        botCamera = BotCamera.newInstance();
 
-        Button button = findViewById(R.id.capture);
-        button.setOnClickListener(new View.OnClickListener() {
+        findViewById(R.id.takePic).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                try {
-                    camera.takePicture();
-                } catch (FileNotFoundException e) {
-                    e.printStackTrace();
+                botCamera.takePicture(null);
+            }
+        });
+
+        findViewById(R.id.switchCamera).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (isFront) {
+                    botCamera.useRearCamera();
+                    isFront = false;
+                } else {
+                    botCamera.useFrontCamera();
+                    isFront = true;
                 }
             }
         });
-        
 
-        /*final BotCamera camera = findViewById(R.id.camera);
-        camera.setFolderName("BotCam");
-        //camera.allowAutoSave(false);
-        camera.setBotCameraListener(new BotCamera.BotCameraListener() {
-            @Override
-            public void onCameraOpened(CameraDevice cameraDevice) {
+        if (hasAccess()) {
+            getSupportFragmentManager().beginTransaction()
+                    .replace(R.id.cameraPreview, botCamera)
+                    .commit();
+        }
+    }
 
-            }
+    private boolean hasAccess() {
+        boolean granted = true;
+        if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            DroidFunctions.requestStoragePermission(MainActivity.this, 2);
+            granted = false;
+        }
 
-            @Override
-            public void onCameraDisconnected(CameraDevice cameraDevice) {
+        if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            DroidFunctions.requestCameraPermission(MainActivity.this, 1);
+            granted = false;
+        }
 
-            }
-
-            @Override
-            public void onCameraOpenError(CameraDevice cameraDevice, int i) {
-
-            }
-
-            @Override
-            public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int i, int i1) {
-
-            }
-
-            @Override
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
-                return false;
-            }
-
-            @Override
-            public void onCameraConfigured(CameraCaptureSession captureSession) {
-
-            }
-
-            @Override
-            public void onCameraConfiguredForCapture(CameraCaptureSession captureSession) {
-
-            }
-
-            @Override
-            public void onCaptureStarted(CameraCaptureSession session, CaptureRequest request, long timestamp, long frameNumber) {
-
-            }
-
-            @Override
-            public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
-
-            }
-
-            @Override
-            public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
-
-            }
-
-            @Override
-            public void getRawImage(byte[] image) {
-
-            }
-        });
-
-        */
+        return granted;
     }
 }
