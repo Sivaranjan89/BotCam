@@ -13,16 +13,36 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 
+import com.droid.botcam.BotCam;
 import com.droid.botcam.BotCamera;
 
+import java.io.FileNotFoundException;
+
 public class MainActivity extends AppCompatActivity {
+
+    private BotCam camera;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        final BotCamera camera = findViewById(R.id.camera);
+        camera = findViewById(R.id.camera);
+
+        Button button = findViewById(R.id.capture);
+        button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                try {
+                    camera.takePicture();
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        
+
+        /*final BotCamera camera = findViewById(R.id.camera);
         camera.setFolderName("BotCam");
         //camera.allowAutoSave(false);
         camera.setBotCameraListener(new BotCamera.BotCameraListener() {
@@ -82,16 +102,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        Button button = findViewById(R.id.capture);
-        button.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                try {
-                    camera.snap();
-                } catch (CameraAccessException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
+        */
     }
 }

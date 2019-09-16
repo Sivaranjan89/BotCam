@@ -201,7 +201,7 @@ public class BotCamera extends TextureView {
             return;
         }
 
-        captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_AF_MODE_AUTO);
+        captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
         cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, mBackgroundHandler);
     }
@@ -250,7 +250,8 @@ public class BotCamera extends TextureView {
 
         final CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
         builder.addTarget(imageReader.getSurface());
-        builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+        //Lock Focus
+        builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START);
 
         int deviceRotation = ((Activity)mContext).getWindowManager().getDefaultDisplay().getRotation();
         builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(deviceRotation));
