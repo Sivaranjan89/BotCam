@@ -19,12 +19,14 @@ import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.util.AttributeSet;
 import android.util.Size;
 import android.util.SparseIntArray;
-import android.view.LayoutInflater;
 import android.view.Surface;
 import android.view.TextureView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -42,36 +44,25 @@ import java.util.List;
 
 public class BotCamera extends TextureView {
 
-    private static final int REQUEST_CAMERA_PERMISSION = 1;
-    private static final int REQUEST_EXTERNALSTORAGE_PERMISSION = 2;
     private Context mContext;
 
     private CameraDevice.StateCallback callback;
     private TextureView.SurfaceTextureListener surfaceTextureListener;
-    private CameraDevice cameraDevice;
-
-    private CameraStateCallback cameraStateCallback;
-    private SurfaceTextureListener textureListener;
-    private CaptureSessionCallback sessionCallback;
-    private CaptureListener cameraCaptureListener;
-    private ReceiveRawImageCallback receiveRawImageCallback;
-
-    private String cameraId;
-
-    private Size imageDimensions;
-
     private CaptureRequest.Builder captureRequestBuilder;
-
     private CameraCaptureSession cameraCaptureSession;
 
-    private static int REAR_CAMERA = 0;
-    private static int FRONT_CAMERA = 1;
+    //Interfaces
+    private BotCameraListener botCameraListener;
+
+    //Camera Parameters
+    private CameraDevice cameraDevice;
+    private String cameraId;
+    private Size imageDimensions;
     private int selectedCamera = 0;
+    private boolean autoSave = true;
 
     private File imageDirectory;
     private File folder;
-
-    private boolean autoSave = true;
 
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
     static {
@@ -81,7 +72,8 @@ public class BotCamera extends TextureView {
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
     }
 
-
+    private HandlerThread mBackgroundThread;
+    private Handler mBackgroundHandler;
 
     public BotCamera(Context context) {
         super(context);
@@ -96,19 +88,20 @@ public class BotCamera extends TextureView {
     }
 
     private void init() {
-        cameraLifecycle();
+        cameraListeners();
     }
 
-    private void cameraLifecycle() {
+    private void cameraListeners() {
         callback = new CameraDevice.StateCallback() {
             @Override
             public void onOpened(@NonNull CameraDevice device) {
                 cameraDevice = device;
-                if (cameraStateCallback != null) {
-                    cameraStateCallback.onOpened(device);
+                if (botCameraListener != null) {
+                    botCameraListener.onCameraOpened(device);
                 }
 
                 try {
+                    startBackgroundThread();
                     showCameraPreview();
                 } catch (CameraAccessException e) {
                     e.printStackTrace();
@@ -117,19 +110,21 @@ public class BotCamera extends TextureView {
 
             @Override
             public void onDisconnected(@NonNull CameraDevice cameraDevice) {
-                if (cameraStateCallback != null) {
-                    cameraStateCallback.onDisconnected(cameraDevice);
+                if (botCameraListener != null) {
+                    botCameraListener.onCameraDisconnected(cameraDevice);
                 } else {
                     cameraDevice.close();
+                    stopBackgroundThread();
                 }
             }
 
             @Override
             public void onError(@NonNull CameraDevice cameraDevice, int i) {
-                if (cameraStateCallback != null) {
-                    cameraStateCallback.onError(cameraDevice, i);
+                if (botCameraListener != null) {
+                    botCameraListener.onCameraOpenError(cameraDevice, i);
                 } else {
                     cameraDevice.close();
+                    stopBackgroundThread();
                 }
             }
         };
@@ -138,8 +133,8 @@ public class BotCamera extends TextureView {
         surfaceTextureListener = new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int i, int i1) {
-                if (textureListener != null) {
-                    textureListener.onSurfaceTextureAvailable(surfaceTexture, i, i1);
+                if (botCameraListener != null) {
+                    botCameraListener.onSurfaceTextureAvailable(surfaceTexture, i, i1);
                 }
 
                 try {
@@ -151,28 +146,23 @@ public class BotCamera extends TextureView {
 
             @Override
             public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int i, int i1) {
-                if (textureListener != null) {
-                    textureListener.onSurfaceTextureSizeChanged(surfaceTexture, i, i1);
-                }
+
             }
 
             @Override
             public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
-                if (textureListener != null) {
-                    textureListener.onSurfaceTextureDestroyed(surfaceTexture);
+                if (botCameraListener != null) {
+                    botCameraListener.onSurfaceTextureDestroyed(surfaceTexture);
                 }
                 return false;
             }
 
             @Override
             public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
-                if (textureListener != null) {
-                    textureListener.onSurfaceTextureUpdated(surfaceTexture);
-                }
+
             }
         };
 
-        setSurfaceTextureListener(null);
         setSurfaceTextureListener(surfaceTextureListener);
     }
 
@@ -188,8 +178,8 @@ public class BotCamera extends TextureView {
             @Override
             public void onConfigured(@NonNull CameraCaptureSession captureSession) {
                 cameraCaptureSession = captureSession;
-                if (sessionCallback != null) {
-                    sessionCallback.onConfigured(captureSession);
+                if (botCameraListener != null) {
+                    botCameraListener.onCameraConfigured(captureSession);
                 }
 
                 try {
@@ -201,11 +191,9 @@ public class BotCamera extends TextureView {
 
             @Override
             public void onConfigureFailed(@NonNull CameraCaptureSession captureSession) {
-                if (sessionCallback != null) {
-                    sessionCallback.onConfigureFailed(captureSession);
-                }
+
             }
-        }, null);
+        }, mBackgroundHandler);
     }
 
     private void updateCameraPreview() throws CameraAccessException {
@@ -213,12 +201,13 @@ public class BotCamera extends TextureView {
             return;
         }
 
-        captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE);
+        captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_AF_MODE_AUTO);
 
-        cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
+        cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, mBackgroundHandler);
     }
 
-    public void openCamera() throws CameraAccessException {
+    private void openCamera() throws CameraAccessException {
+        //Close Camera if already opened
         if (cameraDevice != null) {
             cameraDevice.close();
         }
@@ -237,10 +226,10 @@ public class BotCamera extends TextureView {
 
         imageDimensions = configurationMap.getOutputSizes(SurfaceTexture.class)[0];
 
-        cameraManager.openCamera(cameraId, callback, null);
+        cameraManager.openCamera(cameraId, callback, mBackgroundHandler);
     }
 
-    public void takePicture() throws CameraAccessException {
+    private void takePicture() throws CameraAccessException {
         CameraManager cameraManager = (CameraManager)mContext.getSystemService(Context.CAMERA_SERVICE);
         CameraCharacteristics cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraDevice.getId());
 
@@ -281,15 +270,16 @@ public class BotCamera extends TextureView {
                 byte[] bytes = new byte[buffer.capacity()];
                 buffer.get(bytes);
                 try {
+                    if (botCameraListener != null) {
+                        botCameraListener.getRawImage(bytes);
+                    }
                     if (imageDirectory != null && autoSave) {
-                        processImage(bytes);
-                    } else {
-                        if (receiveRawImageCallback != null) {
-                            receiveRawImageCallback.getRawImage(bytes);
-                        }
+                        saveImageInDirectory(bytes);
                     }
                 } catch (FileNotFoundException e) {
                     e.printStackTrace();
+                    Toast.makeText(mContext, "Please create Directory by calling botcamera.setFolderName(String name)",
+                            Toast.LENGTH_LONG).show();
                 } catch (IOException e) {
                     e.printStackTrace();
                 } finally {
@@ -300,30 +290,27 @@ public class BotCamera extends TextureView {
             }
         };
 
-        imageReader.setOnImageAvailableListener(readerListener, null);
+        imageReader.setOnImageAvailableListener(readerListener, mBackgroundHandler);
 
         final CameraCaptureSession.CaptureCallback captureListener = new CameraCaptureSession.CaptureCallback() {
             @Override
             public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, long timestamp, long frameNumber) {
                 super.onCaptureStarted(session, request, timestamp, frameNumber);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureStarted(session, request, timestamp, frameNumber);
+                if (botCameraListener != null) {
+                    botCameraListener.onCaptureStarted(session, request, timestamp, frameNumber);
                 }
             }
 
             @Override
             public void onCaptureProgressed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureResult partialResult) {
                 super.onCaptureProgressed(session, request, partialResult);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureProgressed(session, request, partialResult);
-                }
             }
 
             @Override
             public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
                 super.onCaptureCompleted(session, request, result);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureCompleted(session, request, result);
+                if (botCameraListener != null) {
+                    botCameraListener.onCaptureCompleted(session, request, result);
                 }
                 try {
                     openCamera();
@@ -335,33 +322,27 @@ public class BotCamera extends TextureView {
             @Override
             public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
                 super.onCaptureFailed(session, request, failure);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureFailed(session, request, failure);
+                if (botCameraListener != null) {
+                    botCameraListener.onCaptureFailed(session, request, failure);
                 }
             }
 
             @Override
             public void onCaptureSequenceCompleted(@NonNull CameraCaptureSession session, int sequenceId, long frameNumber) {
                 super.onCaptureSequenceCompleted(session, sequenceId, frameNumber);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureSequenceCompleted(session, sequenceId, frameNumber);
-                }
+
             }
 
             @Override
             public void onCaptureSequenceAborted(@NonNull CameraCaptureSession session, int sequenceId) {
                 super.onCaptureSequenceAborted(session, sequenceId);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureSequenceAborted(session, sequenceId);
-                }
+
             }
 
             @Override
             public void onCaptureBufferLost(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull Surface target, long frameNumber) {
                 super.onCaptureBufferLost(session, request, target, frameNumber);
-                if (cameraCaptureListener != null) {
-                    cameraCaptureListener.onCaptureBufferLost(session, request, target, frameNumber);
-                }
+
             }
         };
 
@@ -369,12 +350,12 @@ public class BotCamera extends TextureView {
             @Override
             public void onConfigured(@NonNull CameraCaptureSession captureSession) {
                 cameraCaptureSession = captureSession;
-                if (sessionCallback != null) {
-                    sessionCallback.onConfigured(captureSession);
+                if (botCameraListener != null) {
+                    botCameraListener.onCameraConfiguredForCapture(captureSession);
                 }
 
                 try {
-                    captureSession.capture(builder.build(), captureListener, null);
+                    captureSession.capture(builder.build(), captureListener, mBackgroundHandler);
                 } catch (CameraAccessException e) {
                     e.printStackTrace();
                 }
@@ -382,83 +363,56 @@ public class BotCamera extends TextureView {
 
             @Override
             public void onConfigureFailed(@NonNull CameraCaptureSession captureSession) {
-                if (sessionCallback != null) {
-                    sessionCallback.onConfigureFailed(captureSession);
-                }
+
             }
-        }, null);
+        }, mBackgroundHandler);
     }
 
-    private void processImage(byte[] bytes) throws IOException {
+    private void saveImageInDirectory(byte[] bytes) throws IOException {
         OutputStream outputStream = new FileOutputStream(imageDirectory);
         outputStream.write(bytes);
         outputStream.close();
     }
 
-    public interface CameraStateCallback {
-        void onOpened(CameraDevice cameraDevice);
-        void onDisconnected(CameraDevice cameraDevice);
-        void onError(CameraDevice cameraDevice, int i);
+    private void startBackgroundThread() {
+        mBackgroundThread = new HandlerThread("Camera Background");
+        mBackgroundThread.start();
+        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
     }
 
-    public interface SurfaceTextureListener {
+    private void stopBackgroundThread() {
+        mBackgroundThread.quitSafely();
+        try {
+            mBackgroundThread.join();
+            mBackgroundThread = null;
+            mBackgroundHandler = null;
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public interface BotCameraListener {
+        void onCameraOpened(CameraDevice cameraDevice);
+        void onCameraDisconnected(CameraDevice cameraDevice);
+        void onCameraOpenError(CameraDevice cameraDevice, int i);
         void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int i, int i1);
-        void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int i, int i1);
         boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture);
-        void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture);
-    }
-
-    public interface CaptureSessionCallback {
-        void onConfigured(CameraCaptureSession captureSession);
-        void onConfigureFailed(CameraCaptureSession cameraCaptureSession);
-    }
-
-    public interface CaptureListener {
+        void onCameraConfigured(CameraCaptureSession captureSession);
+        void onCameraConfiguredForCapture(CameraCaptureSession captureSession);
         void onCaptureStarted(CameraCaptureSession session, CaptureRequest request, long timestamp, long frameNumber);
-        void onCaptureProgressed(CameraCaptureSession session, CaptureRequest request, CaptureResult partialResult);
-        void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result);
         void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure);
-        void onCaptureSequenceCompleted(CameraCaptureSession session, int sequenceId, long frameNumber);
-        void onCaptureSequenceAborted(CameraCaptureSession session, int sequenceId);
-        void onCaptureBufferLost(CameraCaptureSession session, CaptureRequest request, Surface target, long frameNumber);
-    }
-
-    public interface ReceiveRawImageCallback {
+        void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result);
         void getRawImage(byte[] image);
     }
 
 
     //Setters and Getters
-    public void setBotCamCaptureListener(CaptureListener cameraCaptureListener) {
-        this.cameraCaptureListener = cameraCaptureListener;
+    public void setBotCameraListener(BotCameraListener botCameraListener) {
+        this.botCameraListener = botCameraListener;
     }
 
-    public CaptureListener getBotCamCaptureListener() {
-        return cameraCaptureListener;
-    }
-
-    public void setBotCamCaptureSession(CaptureSessionCallback cameraCaptureSession) {
-        this.sessionCallback = cameraCaptureSession;
-    }
-
-    public CaptureSessionCallback getBotCamCaptureSession() {
-        return sessionCallback;
-    }
-
-    public void setBotCamSurfaceTextureListener(SurfaceTextureListener surfaceTextureListener) {
-        this.textureListener = surfaceTextureListener;
-    }
-
-    public SurfaceTextureListener getBotCamSurfaceTextureListener() {
-        return this.textureListener;
-    }
-
-    public void setBotCamStateCallback(CameraStateCallback cameraStateCallback) {
-        this.cameraStateCallback = cameraStateCallback;
-    }
-
-    public CameraStateCallback getBotCamStateCallback() {
-        return cameraStateCallback;
+    public BotCameraListener getBotCameraListener() {
+        return botCameraListener;
     }
 
     public void setFolderName(String folderName) {
@@ -484,11 +438,21 @@ public class BotCamera extends TextureView {
         openCamera();
     }
 
-    public void onReceivingRawImage(ReceiveRawImageCallback receiveRawImageCallback){
-        this.receiveRawImageCallback = receiveRawImageCallback;
+    public void snap() throws CameraAccessException {
+        takePicture();
     }
 
-    public ReceiveRawImageCallback getReceivedRawImageCallback() {
-        return this.receiveRawImageCallback;
+    public void stopCamera() {
+        if (cameraDevice != null) {
+            cameraDevice.close();
+        }
+    }
+
+    public void startCamera() throws CameraAccessException {
+        openCamera();
+    }
+
+    public void restartCamera() throws CameraAccessException {
+        openCamera();
     }
 }
