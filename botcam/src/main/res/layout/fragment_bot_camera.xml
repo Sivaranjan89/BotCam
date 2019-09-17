@@ -11,9 +11,8 @@
 
     <FrameLayout
         android:id="@+id/frame"
-        android:background="@drawable/frame"
-        android:layout_width="200dp"
-        android:layout_height="200dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_centerInParent="true"/>
 
 </RelativeLayout>

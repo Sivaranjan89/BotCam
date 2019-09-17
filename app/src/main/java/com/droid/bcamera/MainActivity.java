@@ -23,7 +23,9 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         botCamera = BotCamera.newInstance();
-        botCamera.useFlash(false);
+        botCamera.setFlashEnabled(false);
+        botCamera.setZoomEnabled(true);
+        botCamera.setCropFrame(DroidFunctions.imageResourceToBitmap(MainActivity.this, R.drawable.frame), 200, 200);
 
         findViewById(R.id.takePic).setOnClickListener(new View.OnClickListener() {
             @Override
