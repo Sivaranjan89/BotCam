@@ -2,6 +2,11 @@ package com.droid.bcamera;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.graphics.SurfaceTexture;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CaptureFailure;
+import android.hardware.camera2.CaptureRequest;
 import android.os.Bundle;
 import android.view.View;
 
@@ -23,9 +28,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         botCamera = BotCamera.newInstance();
-        botCamera.setFlashEnabled(false);
-        botCamera.setZoomEnabled(true);
-        botCamera.setCropFrame(DroidFunctions.imageResourceToBitmap(MainActivity.this, R.drawable.frame), 200, 200);
+
+        setBotCameraConfiguration();
 
         findViewById(R.id.takePic).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -52,6 +56,53 @@ public class MainActivity extends AppCompatActivity {
                     .replace(R.id.cameraPreview, botCamera)
                     .commit();
         }
+    }
+
+    private void setBotCameraConfiguration() {
+        botCamera.setFlashEnabled(false);
+        botCamera.setZoomEnabled(true);
+        botCamera.useRearCamera();
+
+        botCamera.setOnImageCaptured(new BotCamera.OnImageCaptured() {
+            @Override
+            public void onImageCaptured(byte[] image) {
+                botCamera.saveImageToDirectory(null, image, null);
+            }
+
+            @Override
+            public void onImageCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
+
+            }
+        });
+
+        botCamera.setOnCameraStarted(new BotCamera.OnCameraStarted() {
+            @Override
+            public void onCameraOpened(CameraDevice cameraDevice) {
+
+            }
+
+            @Override
+            public void onCameraDisconected(CameraDevice cameraDevice) {
+
+            }
+
+            @Override
+            public void onCameraError(CameraDevice cameraDevice, int error) {
+
+            }
+        });
+
+        botCamera.setOnSurfaceCreated(new BotCamera.OnSurfaceCreated() {
+            @Override
+            public void onSurfaceAvailable(SurfaceTexture texture, int width, int height) {
+
+            }
+
+            @Override
+            public void onSurfaceDestroyed(SurfaceTexture texture) {
+
+            }
+        });
     }
 
     private boolean hasAccess() {

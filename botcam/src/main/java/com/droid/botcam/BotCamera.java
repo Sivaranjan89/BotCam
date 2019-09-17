@@ -3,6 +3,7 @@ package com.droid.botcam;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
@@ -19,12 +20,14 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -36,7 +39,6 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -55,7 +57,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 public class BotCamera extends Fragment {
-    private static final String FOLDER_NAME = "BotCamera";
+    private static String FOLDER_NAME = "BotCamera";
 
     /**
      * Convert screen rotation to JPEG orientation.
@@ -105,10 +107,6 @@ public class BotCamera extends Fragment {
     //Custom Texture View to customize Aspect Ratios
     private AutoFitTextureView mTextureView;
 
-    //Frame in Preview
-    private FrameLayout mFrame;
-    private float frameWidth, frameHeight, frameTop, frameLeft;
-
     //Capture Session for Camera
     private CameraCaptureSession mCaptureSession;
 
@@ -145,12 +143,6 @@ public class BotCamera extends Fragment {
     //Orientation of the camera sensor
     private int mSensorOrientation;
 
-    //Created Folder
-    private File folder;
-
-    //Directory to Save the captured images
-    private File imageDirectory;
-
     //Fragment Height and Width
     private int fragmentHeight, fragmentWidth;
 
@@ -166,7 +158,6 @@ public class BotCamera extends Fragment {
     private float maximumZoomLevel;
     private Rect zoom;
     private boolean allowZoom = true;
-    private Bitmap cropFrame;
 
 
     public static BotCamera newInstance() {
@@ -193,14 +184,6 @@ public class BotCamera extends Fragment {
                 } else {
                     AutoFitTextureView.isFullScreen = false;
                 }
-
-                //Get Frame Values
-                int[] location = new int[2];
-                mFrame.getLocationOnScreen(location);
-                frameLeft = location[0];
-                frameTop = location[1];
-                frameWidth = mFrame.getMeasuredWidth();
-                frameHeight = mFrame.getMeasuredHeight();
             }
         });
         return rootView;
@@ -209,14 +192,6 @@ public class BotCamera extends Fragment {
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         mTextureView = view.findViewById(R.id.texture);
-        mFrame = view.findViewById(R.id.frame);
-        if (cropFrame != null) {
-            mFrame.setBackground(DroidFunctions.bitmapToDrawable(getActivity(), cropFrame));
-            mFrame.getLayoutParams().height = (int) DroidFunctions.dpToPx(frameHeight);
-            mFrame.getLayoutParams().width = (int) DroidFunctions.dpToPx(frameWidth);
-        } else {
-            mFrame.setBackground(null);
-        }
         mTextureView.invalidate();
         setUpPinchZoom();
     }
@@ -235,7 +210,6 @@ public class BotCamera extends Fragment {
     @Override
     public void onPause() {
         closeCamera();
-        stopBackgroundThread();
         super.onPause();
     }
 
@@ -245,6 +219,11 @@ public class BotCamera extends Fragment {
 
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
+            if (onSurfaceCreated != null) {
+                onSurfaceCreated.onSurfaceAvailable(texture, width, height);
+            }
+
+            //Open Camera once the Surface is available
             openCamera(width, height);
         }
 
@@ -255,6 +234,9 @@ public class BotCamera extends Fragment {
 
         @Override
         public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
+            if (onSurfaceCreated != null) {
+                onSurfaceCreated.onSurfaceDestroyed(texture);
+            }
             return true;
         }
 
@@ -270,22 +252,33 @@ public class BotCamera extends Fragment {
 
         @Override
         public void onOpened(@NonNull CameraDevice cameraDevice) {
+            if (onCameraStarted != null) {
+                onCameraStarted.onCameraOpened(cameraDevice);
+            }
             mCameraOpenCloseLock.release();
             mCameraDevice = cameraDevice;
+
+            //Begin camera preview here once camera is opened
             createCameraPreviewSession();
         }
 
         @Override
         public void onDisconnected(@NonNull CameraDevice cameraDevice) {
+            if (onCameraStarted != null) {
+                onCameraStarted.onCameraDisconected(cameraDevice);
+            }
             mCameraOpenCloseLock.release();
-            cameraDevice.close();
+            closeCamera();
             mCameraDevice = null;
         }
 
         @Override
         public void onError(@NonNull CameraDevice cameraDevice, int error) {
+            if (onCameraStarted != null) {
+                onCameraStarted.onCameraError(cameraDevice, error);
+            }
             mCameraOpenCloseLock.release();
-            cameraDevice.close();
+            closeCamera();
             mCameraDevice = null;
             Activity activity = getActivity();
             if (null != activity) {
@@ -295,13 +288,13 @@ public class BotCamera extends Fragment {
     };
 
     //Create the folder in Exernal Storage
-    private void createFolderInExternalStorage() {
+    private File createFolderInExternalStorage() {
         if (ContextCompat.checkSelfPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
-            return;
+            return null;
         }
 
-        folder = DroidFunctions.createFolderInExternalStorage(FOLDER_NAME);
+        return DroidFunctions.createFolderInExternalStorage(FOLDER_NAME);
     }
 
 
@@ -311,16 +304,7 @@ public class BotCamera extends Fragment {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            if (imageDirectory != null) {
-                if (cropFrame != null) {
-                    mBackgroundHandler.post(new CroppedImageSaver(reader.acquireNextImage(), imageDirectory, frameWidth,
-                            frameHeight, frameTop, frameLeft));
-                } else {
-                    mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), imageDirectory));
-                }
-            } else {
-                //Directory not Created
-            }
+            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), onImageCaptured));
         }
 
     };
@@ -588,6 +572,7 @@ public class BotCamera extends Fragment {
     //Close the camera
     private void closeCamera() {
         try {
+            stopBackgroundThread();
             mCameraOpenCloseLock.acquire();
             if (null != mCaptureSession) {
                 mCaptureSession.close();
@@ -741,15 +726,6 @@ public class BotCamera extends Fragment {
                 captureBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
             }
 
-
-            /*Rect croppedZoom = new Rect((int)(frameWidth),
-                    (int)(frameHeight),
-                    (int)(frameLeft + frameHeight),
-                    (int)(frameTop + frameWidth));
-            if (croppedZoom != null) {
-                captureBuilder.set(CaptureRequest.SCALER_CROP_REGION, croppedZoom);
-            }*/
-
             if (useFlash) {
                 setAutoFlash(captureBuilder);
             }
@@ -766,6 +742,14 @@ public class BotCamera extends Fragment {
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
                     unlockFocus();
+                }
+
+                @Override
+                public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
+                    super.onCaptureFailed(session, request, failure);
+                    if (onImageCaptured != null) {
+                        onImageCaptured.onImageCaptureFailed(session, request, failure);
+                    }
                 }
             };
 
@@ -798,6 +782,10 @@ public class BotCamera extends Fragment {
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
                     CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
 
+            if (zoom != null && allowZoom) {
+                mPreviewRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+            }
+
             if (useFlash) {
                 setAutoFlash(mPreviewRequestBuilder);
             }
@@ -823,17 +811,15 @@ public class BotCamera extends Fragment {
     }
 
 
-    //Save Image to DIrectory
+    //Render Image
     private static class ImageSaver implements Runnable {
 
         private final Image mImage;
+        private final OnImageCaptured onImageCaptured;
 
-        //The Directory we will save it to
-        private final File mFile;
-
-        ImageSaver(Image image, File file) {
+        ImageSaver(Image image, OnImageCaptured onImageCaptured) {
             mImage = image;
-            mFile = file;
+            this.onImageCaptured = onImageCaptured;
         }
 
         @Override
@@ -841,22 +827,12 @@ public class BotCamera extends Fragment {
             ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
             byte[] bytes = new byte[buffer.remaining()];
             buffer.get(bytes);
-            FileOutputStream output = null;
-            try {
-                output = new FileOutputStream(mFile);
-                output.write(bytes);
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                mImage.close();
-                if (null != output) {
-                    try {
-                        output.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
+
+            if (onImageCaptured != null) {
+                onImageCaptured.onImageCaptured(bytes);
             }
+
+            mImage.close();
         }
     }
 
@@ -898,8 +874,6 @@ public class BotCamera extends Fragment {
             captureBitmap.recycle();
 
             //Crop the resized Bitmap
-            int x = (int) ((frameLeft * frameWidth)/resizedBitmap.getWidth());
-            int y = (int) ((frameTop * frameHeight)/resizedBitmap.getHeight());
             Matrix matrix = new Matrix();
             matrix.postRotate(90);
             Bitmap croppedBmp = Bitmap.createBitmap(resizedBitmap,
@@ -961,7 +935,7 @@ public class BotCamera extends Fragment {
 
                         if (event.getPointerCount() == 2) { //Multi touch.
                             currentFingerSpacing = getFingerSpacing(event);
-                            float delta = 0.01f; //Control this value to control the zooming sensitivity
+                            float delta = 0.02f; //Control this value to control the zooming sensitivity
                             if (fingerSpacing != 0) {
                                 if (currentFingerSpacing > fingerSpacing) { //Don't over zoom-in
                                     if ((maximumZoomLevel - zoomLevel) <= delta) {
@@ -1012,17 +986,6 @@ public class BotCamera extends Fragment {
 
     //Click Picture
     public void takePicture(String imageName) {
-        if (imageName == null || imageName.trim().equalsIgnoreCase("")) {
-            Long timeStamp = System.currentTimeMillis() / 1000;
-            imageName = timeStamp.toString();
-        }
-
-        createFolderInExternalStorage();
-
-        if (folder != null) {
-            imageDirectory = new File(folder, imageName + ".jpg");
-        }
-
         if (mCameraId.equalsIgnoreCase("0")) {
             lockFocus();
         } else {
@@ -1050,12 +1013,6 @@ public class BotCamera extends Fragment {
         restartCamera();
     }
 
-    public void setCropFrame(Bitmap frame, float widthInDp, float heightInDp) {
-        this.cropFrame = frame;
-        this.frameWidth = widthInDp;
-        this.frameHeight = heightInDp;
-    }
-
     public void restartCamera() {
         if (mTextureView != null) {
             closeCamera();
@@ -1065,5 +1022,146 @@ public class BotCamera extends Fragment {
                 mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
             }
         }
+    }
+
+    public Bitmap convertRawImageToBitmap(byte[] image) {
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        Bitmap bmp = BitmapFactory.decodeByteArray(image, 0, image.length, options);
+
+        return bmp;
+    }
+
+    public boolean saveImageToDirectory(String folderName, Bitmap image, String imageName) {
+        FileOutputStream output = null;
+        try {
+            //ImageName Check
+            if (imageName == null || imageName.trim().equalsIgnoreCase("")) {
+                Long timeStamp = System.currentTimeMillis() / 1000;
+                imageName = timeStamp.toString();
+            }
+
+            //FolderName Check
+            if (folderName == null || folderName.trim().equalsIgnoreCase("")) {
+                FOLDER_NAME = "BotCamera/Images";
+            }
+
+            //Create Folder if does not exist
+            File folder = createFolderInExternalStorage();
+
+            //Save Image if Folder has been created
+            if (folder != null) {
+                File imageDirectory = new File(folder, imageName + ".jpg");
+                output = new FileOutputStream(imageDirectory);
+                image.compress(Bitmap.CompressFormat.PNG, 100, output);
+                image.recycle();
+
+                //Notify Gallery of new Image
+                getActivity().sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(imageDirectory)));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        } finally {
+            if (null != output) {
+                try {
+                    output.close();
+                    return true;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
+
+    public boolean saveImageToDirectory(String folderName, byte[] image, String imageName) {
+        FileOutputStream output = null;
+        try {
+            //ImageName Check
+            if (imageName == null || imageName.trim().equalsIgnoreCase("")) {
+                Long timeStamp = System.currentTimeMillis() / 1000;
+                imageName = timeStamp.toString();
+            }
+
+            //FolderName Check
+            if (folderName == null || folderName.trim().equalsIgnoreCase("")) {
+                FOLDER_NAME = "BotCamera/Images";
+            }
+
+            //Create Folder if does not exist
+            File folder = createFolderInExternalStorage();
+
+            //Save Image if Folder has been created
+            if (folder != null) {
+                File imageDirectory = new File(folder, imageName + ".jpg");
+                output = new FileOutputStream(imageDirectory);
+                output.write(image);
+
+                //Notify Gallery of new Image
+                getActivity().sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(imageDirectory)));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        } finally {
+            if (null != output) {
+                try {
+                    output.close();
+                    return true;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
+
+
+    //Interfaces
+    private OnImageCaptured onImageCaptured;
+    public interface OnImageCaptured {
+        void onImageCaptured(byte[] image);
+        void onImageCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure);
+    }
+
+    public void setOnImageCaptured(OnImageCaptured onImageCaptured) {
+        this.onImageCaptured = onImageCaptured;
+    }
+
+    public OnImageCaptured getOnImageCaptured() {
+        return onImageCaptured;
+    }
+
+    private OnCameraStarted onCameraStarted;
+    public interface OnCameraStarted {
+        void onCameraOpened(CameraDevice cameraDevice);
+        void onCameraDisconected(CameraDevice cameraDevice);
+        void onCameraError(CameraDevice cameraDevice, int error);
+    }
+
+    public void setOnCameraStarted(OnCameraStarted onCameraStarted) {
+        this.onCameraStarted = onCameraStarted;
+    }
+
+    public OnCameraStarted getOnCameraStarted() {
+        return onCameraStarted;
+    }
+
+    private OnSurfaceCreated onSurfaceCreated;
+    public interface OnSurfaceCreated {
+        void onSurfaceAvailable(SurfaceTexture texture, int width, int height);
+        void onSurfaceDestroyed(SurfaceTexture texture);
+    }
+
+    public void setOnSurfaceCreated(OnSurfaceCreated onSurfaceCreated) {
+        this.onSurfaceCreated = onSurfaceCreated;
+    }
+
+    public OnSurfaceCreated getOnSurfaceCreated() {
+        return onSurfaceCreated;
     }
 }
