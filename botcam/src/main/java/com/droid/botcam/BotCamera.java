@@ -8,6 +8,7 @@ import android.content.res.Configuration;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -28,10 +29,12 @@ import android.os.HandlerThread;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -100,6 +103,10 @@ public class BotCamera extends Fragment {
     //Custom Texture View to customize Aspect Ratios
     private AutoFitTextureView mTextureView;
 
+    //Frame in Preview
+    private FrameLayout mFrame;
+    private float frameWidth, frameHeight, frameTop, frameLeft;
+
     //Capture Session for Camera
     private CameraCaptureSession mCaptureSession;
 
@@ -147,7 +154,15 @@ public class BotCamera extends Fragment {
 
     //The Rootview in our Fragment
     private View rootView;
+
+    //If flash is allowed
     private boolean useFlash = true;
+
+    //Zoom Preview
+    private float fingerSpacing = 0;
+    private float zoomLevel = 1f;
+    private float maximumZoomLevel;
+    private Rect zoom;
 
 
     public static BotCamera newInstance() {
@@ -174,6 +189,12 @@ public class BotCamera extends Fragment {
                 } else {
                     AutoFitTextureView.isFullScreen = false;
                 }
+
+                //Get Frame Values
+                frameLeft = mFrame.getLeft();
+                frameTop = mFrame.getTop();
+                frameWidth = mFrame.getMeasuredWidth();
+                frameHeight = mFrame.getMeasuredHeight();
             }
         });
         return rootView;
@@ -181,8 +202,10 @@ public class BotCamera extends Fragment {
 
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
-        mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
+        mTextureView = view.findViewById(R.id.texture);
+        mFrame = view.findViewById(R.id.frame);
         mTextureView.invalidate();
+        setUpPinchZoom();
     }
 
     @Override
@@ -401,6 +424,8 @@ public class BotCamera extends Fragment {
             for (String cameraId : manager.getCameraIdList()) {
                 CameraCharacteristics characteristics
                         = manager.getCameraCharacteristics(cameraId);
+
+                maximumZoomLevel = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
 
                 StreamConfigurationMap map = characteristics.get(
                         CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
@@ -694,6 +719,19 @@ public class BotCamera extends Fragment {
             // Use the same AE and AF modes as the preview.
             captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            //Zoom
+            if (zoom != null) {
+                captureBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+            }
+
+
+            Rect croppedZoom = new Rect((int)(frameWidth / 2),
+                    (int)(frameHeight / 2),
+                    (int)(mTextureView.getWidth() - (frameWidth/2)),
+                    (int)(mTextureView.getHeight() - (frameHeight/2)));
+            if (croppedZoom != null) {
+                captureBuilder.set(CaptureRequest.SCALER_CROP_REGION, croppedZoom);
+            }
 
             if (useFlash) {
                 setAutoFlash(captureBuilder);
@@ -817,7 +855,65 @@ public class BotCamera extends Fragment {
     }
 
 
+    //Setting Up Pinch Zoom
+    private void setUpPinchZoom () {
+        mTextureView.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View view, MotionEvent event) {
+                try {
+                    CameraManager manager = (CameraManager) getActivity().getSystemService(Context.CAMERA_SERVICE);
+                    CameraCharacteristics cameraCharacteristics = manager.getCameraCharacteristics(mCameraId);
 
+                    Rect rect = cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+                    if (rect == null) {
+                        return false;
+                    }
+                    float currentFingerSpacing;
+
+                    if (event.getPointerCount() == 2) { //Multi touch.
+                        currentFingerSpacing = getFingerSpacing(event);
+                        float delta = 0.01f; //Control this value to control the zooming sensitivity
+                        if (fingerSpacing != 0) {
+                            if (currentFingerSpacing > fingerSpacing) { //Don't over zoom-in
+                                if ((maximumZoomLevel - zoomLevel) <= delta) {
+                                    delta = maximumZoomLevel - zoomLevel;
+                                }
+                                zoomLevel = zoomLevel + delta;
+                            } else if (currentFingerSpacing < fingerSpacing){ //Don't over zoom-out
+                                if ((zoomLevel - delta) < 1f) {
+                                    delta = zoomLevel - 1f;
+                                }
+                                zoomLevel = zoomLevel - delta;
+                            }
+                            float ratio = (float) 1 / zoomLevel; //This ratio is the ratio of cropped Rect to Camera's original(Maximum) Rect
+                            //croppedWidth and croppedHeight are the pixels cropped away, not pixels after cropped
+                            int croppedWidth = rect.width() - Math.round((float)rect.width() * ratio);
+                            int croppedHeight = rect.height() - Math.round((float)rect.height() * ratio);
+                            //Finally, zoom represents the zoomed visible area
+                            zoom = new Rect(croppedWidth/2, croppedHeight/2,
+                                    rect.width() - croppedWidth/2, rect.height() - croppedHeight/2);
+                            mPreviewRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+                        }
+                        fingerSpacing = currentFingerSpacing;
+                    } else { //Single touch point, needs to return true in order to detect one more touch point
+                        return true;
+                    }
+                    mCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, mBackgroundHandler);
+                    return true;
+                } catch (final Exception e) {
+                    //Error handling up to you
+                    return true;
+                }
+            }
+        });
+    }
+
+    //Finger Spacing for Pinch Zoom
+    private float getFingerSpacing(MotionEvent event) {
+        float x = event.getX(0) - event.getX(1);
+        float y = event.getY(0) - event.getY(1);
+        return (float) Math.sqrt(x * x + y * y);
+    }
 
 
     //Click Picture
