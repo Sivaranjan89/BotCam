@@ -23,6 +23,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         botCamera = BotCamera.newInstance();
+        botCamera.useFlash(false);
 
         findViewById(R.id.takePic).setOnClickListener(new View.OnClickListener() {
             @Override

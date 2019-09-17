@@ -9,6 +9,8 @@ public class AutoFitTextureView extends TextureView {
     private int mRatioWidth = 0;
     private int mRatioHeight = 0;
 
+    public static boolean isFullScreen = true;
+
     public AutoFitTextureView(Context context) {
         this(context, null);
     }
@@ -46,10 +48,18 @@ public class AutoFitTextureView extends TextureView {
         if (0 == mRatioWidth || 0 == mRatioHeight) {
             setMeasuredDimension(width, height);
         } else {
-            if (width > height * mRatioWidth / mRatioHeight) {
-                setMeasuredDimension(width, width * mRatioHeight / mRatioWidth);
+            if (isFullScreen) {
+                if (width > height * mRatioWidth / mRatioHeight) {
+                    setMeasuredDimension(width, width * mRatioHeight / mRatioWidth);
+                } else {
+                    setMeasuredDimension(height * mRatioWidth / mRatioHeight, height);
+                }
             } else {
-                setMeasuredDimension(height * mRatioWidth / mRatioHeight, height);
+                if (width < height * mRatioWidth / mRatioHeight) {
+                    setMeasuredDimension(width, width * mRatioHeight / mRatioWidth);
+                } else {
+                    setMeasuredDimension(height * mRatioWidth / mRatioHeight, height);
+                }
             }
         }
     }

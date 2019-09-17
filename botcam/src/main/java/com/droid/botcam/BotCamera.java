@@ -55,13 +55,22 @@ public class BotCamera extends Fragment {
     /**
      * Convert screen rotation to JPEG orientation.
      */
-    private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+    private static final SparseIntArray REAR_ORIENTATIONS = new SparseIntArray();
 
     static {
-        ORIENTATIONS.append(Surface.ROTATION_0, 90);
-        ORIENTATIONS.append(Surface.ROTATION_90, 0);
-        ORIENTATIONS.append(Surface.ROTATION_180, 270);
-        ORIENTATIONS.append(Surface.ROTATION_270, 180);
+        REAR_ORIENTATIONS.append(Surface.ROTATION_0, 90);
+        REAR_ORIENTATIONS.append(Surface.ROTATION_90, 0);
+        REAR_ORIENTATIONS.append(Surface.ROTATION_180, 270);
+        REAR_ORIENTATIONS.append(Surface.ROTATION_270, 180);
+    }
+
+    private static final SparseIntArray FRONT_ORIENTATIONS = new SparseIntArray();
+
+    static {
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_0, 270);
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_90, 0);
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_180, 180);
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_270, 270);
     }
 
     //Camera State : Preview
@@ -138,6 +147,7 @@ public class BotCamera extends Fragment {
 
     //The Rootview in our Fragment
     private View rootView;
+    private boolean useFlash = true;
 
 
     public static BotCamera newInstance() {
@@ -154,6 +164,16 @@ public class BotCamera extends Fragment {
             public void run() {
                 fragmentHeight = rootView.getMeasuredHeight();
                 fragmentWidth = rootView.getMeasuredWidth();
+
+                int screenHeight = DroidFunctions.getScreenHeight();
+                int screenWidth = DroidFunctions.getScreenWidth();
+
+                if (fragmentHeight > screenHeight - 10 && fragmentHeight < screenHeight + 10 &&
+                        fragmentWidth > screenWidth - 10 && fragmentWidth < screenWidth + 10) {
+                    AutoFitTextureView.isFullScreen = true;
+                } else {
+                    AutoFitTextureView.isFullScreen = false;
+                }
             }
         });
         return rootView;
@@ -162,6 +182,7 @@ public class BotCamera extends Fragment {
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
+        mTextureView.invalidate();
     }
 
     @Override
@@ -600,8 +621,10 @@ public class BotCamera extends Fragment {
                                 // Auto focus should be continuous for camera preview.
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-                                // Flash is automatically enabled when necessary.
-                                setAutoFlash(mPreviewRequestBuilder);
+
+                                if (useFlash) {
+                                    setAutoFlash(mPreviewRequestBuilder);
+                                }
 
                                 // Finally, we start displaying the camera preview.
                                 mPreviewRequest = mPreviewRequestBuilder.build();
@@ -671,7 +694,10 @@ public class BotCamera extends Fragment {
             // Use the same AE and AF modes as the preview.
             captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-            setAutoFlash(captureBuilder);
+
+            if (useFlash) {
+                setAutoFlash(captureBuilder);
+            }
 
             // Orientation
             int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
@@ -703,7 +729,11 @@ public class BotCamera extends Fragment {
         // We have to take that into account and rotate JPEG properly.
         // For devices with orientation of 90, we simply return our mapping from ORIENTATIONS.
         // For devices with orientation of 270, we need to rotate the JPEG 180 degrees.
-        return (ORIENTATIONS.get(rotation) + mSensorOrientation + 270) % 360;
+        if (mCameraId == "0") {
+            return (REAR_ORIENTATIONS.get(rotation) + mSensorOrientation + 270) % 360;
+        } else {
+            return (FRONT_ORIENTATIONS.get(rotation) + mSensorOrientation + 270) % 360;
+        }
     }
 
     //This is called once our image is done with capture
@@ -712,7 +742,11 @@ public class BotCamera extends Fragment {
             // Reset the auto-focus trigger
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
                     CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
-            setAutoFlash(mPreviewRequestBuilder);
+
+            if (useFlash) {
+                setAutoFlash(mPreviewRequestBuilder);
+            }
+
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
             // After this, the camera will go back to the normal state of preview.
@@ -823,6 +857,18 @@ public class BotCamera extends Fragment {
             openCamera(mTextureView.getWidth(), mTextureView.getHeight());
         } else {
             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
+        }
+    }
+
+    public void useFlash(boolean useFlash) {
+        this.useFlash = useFlash;
+        closeCamera();
+        if (mTextureView != null) {
+            if (mTextureView.isAvailable()) {
+                openCamera(mTextureView.getWidth(), mTextureView.getHeight());
+            } else {
+                mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
+            }
         }
     }
 }
