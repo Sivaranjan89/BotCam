@@ -8,17 +8,22 @@ Available Functions,
 
 # How to Install Plugin
 Add the below in your root build.gradle(project) at the end of repositories:<br />
-<b>allprojects { </b><br />
-<b>repositories { </b><br />
-<b>... </b><br />
-<b>maven { url 'https://jitpack.io' } </b><br />
-<b>} </b><br />
-<b>} </b><br />
-            
+
+~~~
+allprojects {
+		repositories {
+			...
+			maven { url 'https://jitpack.io' }
+		}
+	}
+~~~
+<br />
 Add the dependency in build.gradle(module) : <br />
-<b>dependencies { </b><br />
-<b>implementation 'com.github.Sivaranjan89:Keys:1.3'</b><br />
-<b>}</b><br />
+~~~
+dependencies {
+	        implementation 'com.github.Sivaranjan89:botcam:1.0'
+	}
+~~~
 
 # Invoke Botcam Fragment (Make sure you have the required permissions before invoking this)
 ~~~
