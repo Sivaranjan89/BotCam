@@ -985,7 +985,7 @@ public class BotCamera extends Fragment {
 
 
     //Click Picture
-    public void takePicture(String imageName) {
+    public void takePicture() {
         if (mCameraId.equalsIgnoreCase("0")) {
             lockFocus();
         } else {

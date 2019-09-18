@@ -34,7 +34,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.takePic).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                botCamera.takePicture(null);
+                botCamera.takePicture();
             }
         });
 
