@@ -75,9 +75,9 @@ public class BotCamera extends Fragment {
 
     static {
         FRONT_ORIENTATIONS.append(Surface.ROTATION_0, 270);
-        FRONT_ORIENTATIONS.append(Surface.ROTATION_90, 0);
-        FRONT_ORIENTATIONS.append(Surface.ROTATION_180, 180);
-        FRONT_ORIENTATIONS.append(Surface.ROTATION_270, 270);
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_90, 180);
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_180, 90);
+        FRONT_ORIENTATIONS.append(Surface.ROTATION_270, 0);
     }
 
     //Camera State : Preview
@@ -1016,6 +1016,7 @@ public class BotCamera extends Fragment {
     public void restartCamera() {
         if (mTextureView != null) {
             closeCamera();
+            startBackgroundThread();
             if (mTextureView.isAvailable()) {
                 openCamera(mTextureView.getWidth(), mTextureView.getHeight());
             } else {
