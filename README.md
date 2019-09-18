@@ -7,7 +7,7 @@ Available Functions,
 4) Save the resulting image in raw byte[] or bitmap
 
 # How to Install Plugin
-Add the below in your root build.gradle(project) at the end of repositories:<br />
+Add the below in your root build.gradle(project) at the end of repositories:
 
 ~~~
 allprojects {
@@ -17,12 +17,14 @@ allprojects {
 		}
 	}
 ~~~
-<br />
-Add the dependency in build.gradle(module) : <br />
+
+Add the dependency in build.gradle(module) :
 ~~~
+
 dependencies {
 	        implementation 'com.github.Sivaranjan89:botcam:1.0'
 	}
+	
 ~~~
 
 # Invoke Botcam Fragment (Make sure you have the required permissions before invoking this)
